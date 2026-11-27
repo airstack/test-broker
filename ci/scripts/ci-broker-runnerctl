@@ -1,0 +1,324 @@
+#!/bin/bash
+# ci-broker-runnerctl: the narrow root door (sudoers: the operator may run it with any args; every arg is checked).
+# It never takes a path, a hash, unit text or a script from its caller. Every name and path comes from
+# /etc/ci-broker/install.conf (never the environment). Every call is logged (logger -t ci-broker-runnerctl).
+set -euo pipefail
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+umask 077
+IFS=$' \t\n'
+LC_ALL=C
+export LC_ALL
+CONF=/etc/ci-broker/install.conf
+# during an install (install.sh renames it at the very end): the pending one, root's too; never an env override
+[[ -f $CONF ]] || CONF=$CONF.pending
+LIB=/usr/local/lib/ci-broker
+# The runner tarballs root accepts: "<version> <sha256>" (the sha256 GitHub publishes in the release notes).
+RUNNER_DISTS=(
+  "2.338.2 baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40"
+)
+DIST_URL=https://github.com/actions/runner/releases/download
+# >>> install-conf reader (the same in every root script; a test checks the copies match)
+# Strict: one KEY=value per line, known keys only, no duplicates, values ^[A-Za-z0-9_./-]{1,200}$, user/group names
+# ^[a-z_][a-z0-9_-]{0,31}$, paths absolute without a `..` segment. Parsed, never sourced. Sets IC_<KEY>.
+read_install_conf() {
+  local f=$1 line k v n=0 seen=' '
+  [[ -f $f && ! -L $f ]] || { echo "install.conf: $f is missing (run scripts/install.sh)" >&2; return 1; }
+  while IFS= read -r line || [[ -n $line ]]; do
+    n=$((n + 1))
+    [[ -z $line ]] && continue
+    [[ $line =~ ^([A-Z_]+)=(.*)$ ]] || { echo "install.conf line $n: not KEY=value" >&2; return 1; }
+    k=${BASH_REMATCH[1]} v=${BASH_REMATCH[2]}
+    case $k in OPERATOR | OPERATOR_GROUP | DAEMON_USER | RUNNER_USER | OPT_DIR | STATE_DIR | ETC_DIR | TOOLS_DIR) ;; *) echo "install.conf line $n: unknown key $k" >&2; return 1 ;; esac
+    [[ $seen == *" $k "* ]] && { echo "install.conf line $n: $k given twice" >&2; return 1; }
+    seen+="$k "
+    [[ $v =~ ^[A-Za-z0-9_./-]{1,200}$ ]] || { echo "install.conf: $k has a bad value" >&2; return 1; }
+    case $k in
+      OPERATOR | OPERATOR_GROUP | DAEMON_USER | RUNNER_USER) [[ $v =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { echo "install.conf: $k is not a user or group name" >&2; return 1; } ;;
+      *) [[ $v == /* && /$v/ != */../* ]] || { echo "install.conf: $k must be an absolute path" >&2; return 1; } ;;
+    esac
+    printf -v "IC_$k" '%s' "$v"
+  done <"$f"
+  for k in OPERATOR OPERATOR_GROUP DAEMON_USER RUNNER_USER OPT_DIR STATE_DIR ETC_DIR TOOLS_DIR; do
+    [[ $seen == *" $k "* ]] || { echo "install.conf: $k is missing" >&2; return 1; }
+  done
+}
+# <<< install-conf reader
+
+log() { logger -t ci-broker-runnerctl -- "$*" 2>/dev/null || true; }
+die() {
+  echo "ci-broker-runnerctl: $*" >&2
+  log "refused: $*"
+  exit 64
+}
+read_install_conf "$CONF" || exit 64
+cd / # the caller's cwd may be unreadable for the users we run things as
+S=$IC_STATE_DIR
+RU=$IC_RUNNER_USER
+DU=$IC_DAEMON_USER
+UNIT=/etc/systemd/system/ci-broker-runner@.service
+log "by uid ${SUDO_UID:-$(id -u)}: $(printf '%q ' "$@" | cut -c1-300)"
+[[ $(id -u) == 0 ]] || die "run it as root (sudo -n ci-broker-runnerctl …)"
+
+id_ok() { [[ $1 =~ ^[A-Za-z0-9_.-]{1,100}__[A-Za-z0-9_.-]{1,100}-[0-9]{1,3}$ ]] || die "bad runner id"; }
+repo_ok() {
+  [[ $1 =~ ^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$ ]] || die "bad repo"
+  local o=${1%%/*} n=${1#*/}
+  [[ $o != . && $o != .. && $n != . && $n != .. ]] || die "bad repo"
+}
+n_ok() { [[ $1 =~ ^[0-9]{1,3}$ ]] || die "bad index"; }
+name_ok() { [[ $1 =~ ^[A-Za-z0-9_.-]{1,64}$ ]] || die "bad runner name"; }
+labels_ok() { [[ $1 =~ ^[A-Za-z0-9_.-]{1,64}(,[A-Za-z0-9_.-]{1,64}){0,9}$ ]] || die "bad labels"; }
+dist_sha() { # the allowlisted sha256 of a version, or nothing
+  local e
+  for e in "${RUNNER_DISTS[@]}"; do [[ ${e%% *} == "$1" ]] && { echo "${e#* }"; return 0; }; done
+  return 1
+}
+version_ok() {
+  if [[ $1 =~ ^[0-9]{1,3}\.[0-9]{1,4}\.[0-9]{1,4}$ ]] && dist_sha "$1" >/dev/null; then return 0; fi
+  die "version $1 is not in runnerctl's allowlist"
+}
+# one stdin line, at most 512 bytes, then the token rule; nothing else is read
+read_token() {
+  local t=''
+  IFS= read -r -n 512 t || true
+  [[ $t =~ ^[A-Za-z0-9_-]{20,200}$ ]] || die "bad token on stdin (one line, 20-200 of A-Z a-z 0-9 _ -)"
+  printf '%s' "$t"
+}
+no_link() { [[ ! -L $1 ]] || die "$1 is a symlink: refusing (root never follows a link in a tree another user can write)"; }
+runners_json() { if [[ -f $S/runners.json && ! -L $S/runners.json ]]; then cat "$S/runners.json"; else echo '[]'; fi; }
+write_runners_json() { # stdin: the new JSON
+  local t
+  t=$(mktemp "$S/.runners.json.XXXXXX")
+  jq . >"$t"
+  chmod 0644 "$t"
+  mv -f "$t" "$S/runners.json"
+}
+ids_of() { # an id, or every runner id of a repo
+  if [[ $1 == */* ]]; then
+    repo_ok "$1"
+    runners_json | jq -r --arg r "$1" '.[] | select((.repo | ascii_downcase) == ($r | ascii_downcase)) | .id'
+  else
+    id_ok "$1"
+    echo "$1"
+  fi
+}
+# Run config.sh in a runner dir as the runner user; the token (if any) only in its env, never in an argv.
+as_runner_config() { # <dir> <token or ''> <config.sh args…>
+  local dir=$1 tok=$2
+  shift 2
+  (
+    for v in $(compgen -e); do unset "$v" 2>/dev/null || true; done
+    export HOME=$dir/.home PATH=/usr/bin:/bin LANG=C.UTF-8
+    [[ -n $tok ]] && export ACTIONS_RUNNER_INPUT_TOKEN="$tok"
+    cd "$dir"
+    exec setpriv --reuid="$RU" --regid="$RU" --init-groups -- /bin/bash -c 'umask 077; exec ./config.sh "$@"' config "$@"
+  )
+}
+
+unit_text() {
+  cat <<UNIT
+# written by ci-broker-runnerctl install-unit from $CONF; do not edit (re-run install)
+[Unit]
+Description=ci-broker GitHub Actions runner %i
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=$RU
+Group=$RU
+# as root ("+"): rewrite .env and .path from scratch at every start
+ExecStartPre=+$LIB/runner-start --prepare %i
+ExecStart=$LIB/runner-start %i
+WorkingDirectory=$S/runners/%i
+Environment=HOME=$S/runners/%i/.home
+Environment=DOTNET_EnableDiagnostics=0
+Environment=PATH=$IC_OPT_DIR/current/bin:/usr/local/bin:/usr/bin:/bin
+Restart=always
+RestartSec=10
+KillSignal=SIGINT
+TimeoutStopSec=60
+UMask=0077
+# filesystem: read-only everywhere; this runner sees only its own dir under runners/
+ProtectSystem=strict
+ProtectHome=yes
+TemporaryFileSystem=$S/runners:ro
+BindPaths=$S/runners/%i
+InaccessiblePaths=-/run/tailscale -/var/run/tailscale
+PrivateTmp=yes
+PrivateDevices=yes
+PrivatePIDs=yes
+ProtectProc=invisible
+# privileges
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+# no RestrictSUIDSGID=: its seccomp filter answers openat2() with ENOSYS, and GNU tar 1.35 (which the runner uses to
+# unpack every action) has no fallback (spike result). NoNewPrivileges=yes already makes setuid bits inert here.
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictRealtime=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+# network: the internet yes; this machine and private ranges no (DNS through resolved's stub)
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+IPAddressDeny=localhost link-local multicast 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 fc00::/7
+IPAddressAllow=127.0.0.53
+MemoryMax=2G
+TasksMax=1024
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+}
+host_addrs_text() { # the machine's own global addresses, denied too
+  local a out=''
+  for a in $(ip -o addr show scope global 2>/dev/null | awk '{print $4}'); do
+    a=${a%/*}
+    [[ $a =~ ^[0-9a-fA-F.:]{2,45}$ ]] || continue
+    if [[ $a == *:* ]]; then out+=" $a/128"; else out+=" $a/32"; fi
+  done
+  printf '# written by ci-broker-runnerctl install-unit: this machine'"'"'s global addresses at install time\n[Service]\nIPAddressDeny=%s\n' "${out# }"
+}
+
+cmd=${1:-}
+shift || true
+case $cmd in
+  install-unit)
+    [[ $# == 0 ]] || die "usage: install-unit"
+    no_link "$UNIT"
+    no_link "$UNIT.d"
+    unit_text >"$UNIT.tmp" && chmod 0644 "$UNIT.tmp" && mv -f "$UNIT.tmp" "$UNIT"
+    install -d -m 0755 "$UNIT.d"
+    host_addrs_text >"$UNIT.d/10-host-addrs.conf.tmp" && chmod 0644 "$UNIT.d/10-host-addrs.conf.tmp" && mv -f "$UNIT.d/10-host-addrs.conf.tmp" "$UNIT.d/10-host-addrs.conf"
+    systemctl daemon-reload
+    echo "installed $UNIT (+ 10-host-addrs.conf)"
+    ;;
+  versions)
+    for e in "${RUNNER_DISTS[@]}"; do echo "${e%% *}"; done
+    ;;
+  dist)
+    [[ $# == 1 ]] || die "usage: dist <version>"
+    v=$1
+    version_ok "$v"
+    want=$(dist_sha "$v")
+    d=$S/runner-dist/$v
+    no_link "$S/runner-dist"
+    no_link "$d"
+    # an unpacked dist is used only when its marker says it came from the allowlisted tarball (a dir unpacked by
+    # anything else, e.g. the spike, is replaced)
+    if [[ -x $d/config.sh && -f $d/.ci-broker-sha256 && ! -L $d/.ci-broker-sha256 && $(cat "$d/.ci-broker-sha256") == "$want" ]]; then echo "runner $v: already unpacked (sha256 $want)"; exit 0; fi
+    if [[ -e $d ]]; then
+      echo "runner $v: $d has no matching sha256 marker: replacing it"
+      rm -rf -- "${d:?}"
+    fi
+    tmp=$(mktemp -d /root/.ci-broker-dist.XXXXXX 2>/dev/null || mktemp -d)
+    trap 'rm -rf -- "${tmp:?}"' EXIT
+    curl -fsSL -o "$tmp/runner.tgz" "$DIST_URL/v$v/actions-runner-linux-x64-$v.tar.gz"
+    got=$(sha256sum "$tmp/runner.tgz" | cut -d' ' -f1)
+    [[ $got == "$want" ]] || die "runner $v: sha256 $got is not the allowlisted $want"
+    install -d -m 0755 -o root -g root "$S/runner-dist" "$tmp/unpack"
+    tar -xzf "$tmp/runner.tgz" -C "$tmp/unpack" --no-same-owner
+    chown -R -P root:root "$tmp/unpack"
+    chmod 0755 "$tmp/unpack"
+    printf '%s\n' "$want" >"$tmp/unpack/.ci-broker-sha256"
+    chmod 0644 "$tmp/unpack/.ci-broker-sha256"
+    mv "$tmp/unpack" "$d"
+    echo "runner $v: unpacked into $d"
+    ;;
+  add)
+    [[ $# == 5 ]] || die "usage: add <owner/name> <n> <name> <labels> <version> (the registration token on stdin)"
+    repo=$1 n=$2 name=$3 labels=$4 v=$5
+    repo_ok "$repo"
+    n_ok "$n"
+    name_ok "$name"
+    labels_ok "$labels"
+    version_ok "$v"
+    id="${repo%%/*}__${repo#*/}-$n"
+    id_ok "$id"
+    dir=$S/runners/$id
+    no_link "$S/runners"
+    [[ -e $dir || -L $dir ]] && die "runner dir $dir exists in some form: rm it first (ci-broker-runnerctl rm $id)"
+    dist=$S/runner-dist/$v
+    [[ -d $dist && ! -L $dist && -x $dist/config.sh ]] || die "no runner dist $v (ci-broker-runnerctl dist $v)"
+    tok=$(read_token)
+    install -d -m 0700 -o root -g root "$dir"
+    cp -a "$dist/." "$dir/"
+    mkdir -p "$dir/.home" "$dir/_work" "$dir/_diag"
+    chown -R -P "$RU:$RU" "$dir" # root's own fresh copy: no planted links in it
+    chmod 0700 "$dir"            # cp -a copied the dist's 0755 onto it (spike)
+    if ! as_runner_config "$dir" "$tok" --unattended --url "https://github.com/$repo" --name "$name" --labels "$labels" --work _work; then
+      chmod -R u+rwX "$dir"
+      rm -rf -- "${dir:?}"
+      die "config.sh failed for $id (the dir was removed again)"
+    fi
+    "$LIB/runner-start" --prepare "$id"
+    runners_json | jq --arg id "$id" --arg repo "$repo" --arg name "$name" --arg labels "$labels" --arg v "$v" --argjson t "$(date +%s)" \
+      '[.[] | select(.id != $id)] + [{ id: $id, repo: $repo, name: $name, labels: ($labels | split(",")), version: $v, addedAt: ($t * 1000) }]' | write_runners_json
+    systemctl enable --now "ci-broker-runner@$id.service"
+    log "added $id ($name) for $repo"
+    echo "added runner $name as $id"
+    ;;
+  rm)
+    # nothing in a runner dir ever runs outside its unit (a job can write it): the unit is stopped and the dir
+    # deleted as root; the GitHub side is the operator's, at the settings page
+    [[ $# == 1 ]] || die "usage: rm <id>"
+    id=$1
+    id_ok "$id"
+    dir=$S/runners/$id
+    no_link "$S/runners"
+    no_link "$dir"
+    systemctl disable --now "ci-broker-runner@$id.service" || true
+    repo=$(runners_json | jq -r --arg id "$id" '.[] | select(.id == $id) | .repo' | head -1)
+    name=$(runners_json | jq -r --arg id "$id" '.[] | select(.id == $id) | .name' | head -1)
+    if [[ -d $dir ]]; then
+      # the parent (runners/, root's) is ours: chmod -R and rm -rf never follow a link inside the tree
+      chmod -R u+rwX -- "$dir"
+      rm -rf -- "${dir:?}"
+    fi
+    runners_json | jq --arg id "$id" '[.[] | select(.id != $id)]' | write_runners_json
+    log "removed $id"
+    echo "removed $id${repo:+ (delete the runner ${name:-$id} on GitHub: https://github.com/$repo/settings/actions/runners)}"
+    ;;
+  stop | start)
+    [[ $# == 1 ]] || die "usage: $cmd <id>|<owner/name>"
+    ids=$(ids_of "$1")
+    [[ -n $ids ]] || die "no runners for $1"
+    for id in $ids; do
+      id_ok "$id"
+      if [[ $cmd == stop ]]; then systemctl disable --now "ci-broker-runner@$id.service"; else systemctl enable --now "ci-broker-runner@$id.service"; fi
+      echo "$cmd: ci-broker-runner@$id"
+    done
+    ;;
+  daemon)
+    [[ $# == 1 ]] || die "usage: daemon start|stop|restart|status|warm"
+    case $1 in
+      start) systemctl enable --now ci-brokerd.service ;;
+      stop) systemctl disable --now ci-brokerd.service ;;
+      restart) systemctl restart ci-brokerd.service ;;
+      status) systemctl status --no-pager ci-brokerd.service || true ;;
+      warm)
+        if systemctl is-active --quiet ci-brokerd.service; then die "the daemon runs: warm the mirrors before the switch"; fi
+        runuser -u "$DU" -- "$IC_OPT_DIR/current/bin/ci-brokerd" --warm-mirrors
+        ;;
+      *) die "usage: daemon start|stop|restart|status|warm" ;;
+    esac
+    ;;
+  list)
+    [[ $# == 0 ]] || die "usage: list"
+    runners_json | jq -c '.[]' | while IFS= read -r row; do
+      id=$(jq -r .id <<<"$row")
+      [[ $id =~ ^[A-Za-z0-9_.-]{1,100}__[A-Za-z0-9_.-]{1,100}-[0-9]{1,3}$ ]] || continue
+      st=$(systemctl is-active "ci-broker-runner@$id.service" 2>/dev/null || true)
+      jq -c --arg st "${st:-unknown}" '. + { active: $st }' <<<"$row"
+    done | jq -s .
+    ;;
+  *)
+    die "usage: install-unit | versions | dist <version> | add <owner/name> <n> <name> <labels> <version> | rm <id> | stop|start <id>|<owner/name> | daemon start|stop|restart|status|warm | list"
+    ;;
+esac

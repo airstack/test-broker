@@ -1,0 +1,62 @@
+#!/bin/bash
+# ci-broker runner-start: the runner unit's ExecStartPre (as root, `--prepare`: rewrite .env and .path from scratch)
+# and ExecStart (as the runner user: exec the runner). Root-owned, not in sudoers. Every path from install.conf.
+set -euo pipefail
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+IFS=$' \t\n'
+umask 022
+CONF=/etc/ci-broker/install.conf
+# during an install (install.sh renames it at the very end): the pending one, root's too; never an env override
+[[ -f $CONF ]] || CONF=$CONF.pending
+# >>> install-conf reader (the same in every root script; a test checks the copies match)
+# Strict: one KEY=value per line, known keys only, no duplicates, values ^[A-Za-z0-9_./-]{1,200}$, user/group names
+# ^[a-z_][a-z0-9_-]{0,31}$, paths absolute without a `..` segment. Parsed, never sourced. Sets IC_<KEY>.
+read_install_conf() {
+  local f=$1 line k v n=0 seen=' '
+  [[ -f $f && ! -L $f ]] || { echo "install.conf: $f is missing (run scripts/install.sh)" >&2; return 1; }
+  while IFS= read -r line || [[ -n $line ]]; do
+    n=$((n + 1))
+    [[ -z $line ]] && continue
+    [[ $line =~ ^([A-Z_]+)=(.*)$ ]] || { echo "install.conf line $n: not KEY=value" >&2; return 1; }
+    k=${BASH_REMATCH[1]} v=${BASH_REMATCH[2]}
+    case $k in OPERATOR | OPERATOR_GROUP | DAEMON_USER | RUNNER_USER | OPT_DIR | STATE_DIR | ETC_DIR | TOOLS_DIR) ;; *) echo "install.conf line $n: unknown key $k" >&2; return 1 ;; esac
+    [[ $seen == *" $k "* ]] && { echo "install.conf line $n: $k given twice" >&2; return 1; }
+    seen+="$k "
+    [[ $v =~ ^[A-Za-z0-9_./-]{1,200}$ ]] || { echo "install.conf: $k has a bad value" >&2; return 1; }
+    case $k in
+      OPERATOR | OPERATOR_GROUP | DAEMON_USER | RUNNER_USER) [[ $v =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { echo "install.conf: $k is not a user or group name" >&2; return 1; } ;;
+      *) [[ $v == /* && /$v/ != */../* ]] || { echo "install.conf: $k must be an absolute path" >&2; return 1; } ;;
+    esac
+    printf -v "IC_$k" '%s' "$v"
+  done <"$f"
+  for k in OPERATOR OPERATOR_GROUP DAEMON_USER RUNNER_USER OPT_DIR STATE_DIR ETC_DIR TOOLS_DIR; do
+    [[ $seen == *" $k "* ]] || { echo "install.conf: $k is missing" >&2; return 1; }
+  done
+}
+# <<< install-conf reader
+read_install_conf "$CONF" || exit 64
+mode=run
+[[ ${1:-} == --prepare ]] && { mode=prepare; shift; }
+id=${1:?usage: runner-start [--prepare] <id>}
+[[ $id =~ ^[A-Za-z0-9_.-]{1,100}__[A-Za-z0-9_.-]{1,100}-[0-9]{1,3}$ ]] || { echo "bad runner id"; exit 64; }
+dir=$IC_STATE_DIR/runners/$id
+if [[ $mode == prepare ]]; then # root, real filesystem (systemd "+" skips the sandbox)
+  [[ -d $dir && ! -L $dir ]] || { echo "no runner dir $dir"; exit 64; }
+  for f in .env .path; do rm -f -- "${dir:?}/${f:?}"; done # unlink first: never write through a planted symlink
+  (
+    set -C
+    printf '%s\n' LANG=C.UTF-8 \
+      "ACTIONS_RUNNER_HOOK_JOB_STARTED=$IC_OPT_DIR/current/bin/cib-admit.sh" \
+      DOTNET_EnableDiagnostics=0 \
+      "CI_BROKER_GITHUB_SOCKET=$IC_STATE_DIR/sock/github.sock" >"$dir/.env"
+    printf '%s\n' "$IC_OPT_DIR/current/bin:/usr/local/bin:/usr/bin:/bin" >"$dir/.path"
+  )
+  # no chown/chmod by path afterwards: the runner user owns the dir and could swap a link in. Root made both files
+  # (O_EXCL, umask 022): they are root:root 0644 already.
+  exit 0 # nothing else here: root never chowns or creates anything else in a dir the runner user can write
+fi
+[[ $(id -u) != 0 ]] || { echo "refusing to run a runner as root"; exit 64; }
+# the runner's steps get this process's PATH (the runner does not read .path): the client first, as in .path
+PATH=$IC_OPT_DIR/current/bin:/usr/local/bin:/usr/bin:/bin
+export PATH
+exec "$dir/run.sh"

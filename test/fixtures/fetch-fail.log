@@ -1,0 +1,6 @@
+
+=== [0s] bootstrap: just
+
+=== [1s] checkout d9168dfc6
+fatal: couldn't find remote ref d9168dfc6
+cannot fetch ref d9168dfc6 from origin

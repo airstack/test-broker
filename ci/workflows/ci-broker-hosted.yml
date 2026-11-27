@@ -1,0 +1,83 @@
+name: ci-broker-hosted
+
+# GitHub-hosted fallback for ci-brokerd's `github` resource (https://github.com/airstack/test-broker). The daemon
+# dispatches this workflow for a whole mode of a pushed commit when its own resources (local, ssh, Boat) have been
+# busy for `afterWaitSec`:
+#
+#   gh workflow run ci-broker-hosted.yml --ref <default branch> -f sha=<sha> -f mode=<mode> -f args='<JSON array>' \
+#     -f job=<daemonId>-<job>
+#
+# The daemon finds the run by its run-name, which MUST start with `ci-broker ${{ inputs.job }}` (keep the run-name
+# below as it is), polls it, then reads `gh run view --log` into the job's log and `gh run download` into its
+# artifacts. success → passed, failure → failed; anything else (cancelled, timed out) has no result and is retried
+# once. It costs Actions minutes: list only the modes worth it in the resource's `modes`.
+#
+# Copy into .github/workflows/ of the consumer repo (it must be on the default branch for workflow_dispatch), then
+# fill in the two marked steps. `ci-broker check <github resource>` verifies the file is there with these inputs.
+
+# Quoted: the expression has no " #", but keep the run-name a single quoted string.
+run-name: "ci-broker ${{ inputs.job }} ${{ inputs.mode }} ${{ inputs.sha }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full commit sha to test (pushed)
+        required: true
+      mode:
+        description: Profile mode to run as a whole (e.g. test-all)
+        required: true
+      args:
+        description: JSON array of extra args for the mode
+        default: '[]'
+      job:
+        description: ci-brokerd job token (<daemonId>-<job>[.<attempt>]); identifies the run
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  hosted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: checkout the sha
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+
+      # ---- repo setup: FILL IN ------------------------------------------------------------------------------------
+      # Whatever the repo's tests need on a fresh ubuntu-latest runner, e.g. for a pnpm + just repo:
+      #   - uses: pnpm/action-setup@v4
+      #   - uses: actions/setup-node@v4
+      #     with: { node-version: 24, cache: pnpm }
+      #   - uses: extractions/setup-just@v2
+      #   - run: pnpm install --frozen-lockfile
+      # Secrets the tests need come from the repo's Actions secrets (env: below), never from the daemon.
+      - name: repo setup (placeholder)
+        run: echo "repo setup goes here (see the comment above this step)"
+
+      # ---- run the mode: FILL IN the case for each mode listed in the resource's `modes` ----------------------------
+      - name: run ${{ inputs.mode }}
+        env:
+          MODE: ${{ inputs.mode }}
+          ARGS: ${{ inputs.args }}
+        run: |
+          mapfile -d '' args < <(jq -j '.[] | tostring + "\u0000"' <<<"$ARGS")
+          case "$MODE" in
+            # test-all) just test-all "${args[@]}" ;;
+            # e2e)      just test-e2e "${args[@]}" ;;
+            *) echo "::error::mode '$MODE' is not set up in ci-broker-hosted.yml"; exit 1 ;;
+          esac
+
+      - name: upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-broker-hosted-${{ inputs.job }}
+          # the profile's `artifacts` paths, e.g. e2e/test-results
+          path: |
+            e2e/test-results
+            screenshots
+          if-no-files-found: ignore

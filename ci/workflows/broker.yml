@@ -1,0 +1,84 @@
+name: broker
+
+# Test runs brokered by this machine's ci-brokerd (https://github.com/airstack/test-broker) through the self-hosted
+# `ci-broker` runners. The runner job only waits on the daemon: `ci-broker submit --github` streams the run's output,
+# exits with its result, writes the receipt to the step summary, adds failures as annotations and leaves the artifacts
+# and shard logs in ci-broker-artifacts/ for the upload step.
+#
+#  - Who may trigger it: only the accounts on the daemon's approved list (root's /etc/ci-broker/config.json, pinned
+#    by account id). The runner's pre-job hook and the daemon's GitHub door check every run with the daemon's own
+#    token; anything else fails at "Set up runner" with the reason as an annotation (trust/<check>).
+#  - Dispatch: `ci-broker dispatch --sha <full sha> [--mode test-all] [-- --grep x]` (it puts the args digest in the
+#    run name, which the daemon checks). By hand: `gh workflow run broker.yml -f sha=… -f mode=… -f args='["--grep","x"]'
+#    -f argsHash=$(printf %s '["--grep","x"]' | sha256sum | cut -c1-64)` (`-` for no args). The sha must be merged into
+#    the default branch, or the head of an open PR by an approved author.
+#    Dispatch runs never cancel each other; the daemon joins an identical run instead of starting a second one.
+#  - PRs: add the `ci-broker-test` label to run the profile's `github.prMode` (acme: `all`) on the PR head
+#    (re-runs on every push while the label is on; a new push cancels the previous label run). The PR author, the
+#    labeller and a re-runner must all be approved; the PR must come from a branch of this repo against the default
+#    branch.
+#  - A PR that touches .github/ is refused (it could change what runs on our runner): test it by dispatch instead.
+#  - A bot's PR (dependabot) or an unlisted collaborator's is refused: an approved person pushes it as their own PR
+#    branch (`gh pr checkout <n> && git push origin HEAD:refs/heads/<name>`, then `gh pr create`), or merges it.
+#  - Sign-off: a run without args on a pushed commit posts the commit status `ci-broker/<mode>` (the daemon posts it,
+#    for local and GitHub runs alike), so that context can be the required check.
+#
+# Copy into .github/workflows/ of a consumer repo. Must be on the default branch for workflow_dispatch to work.
+
+# Quoted: an unquoted " #" would start a YAML comment.
+run-name: "${{ github.event_name == 'workflow_dispatch' && format('broker {0} {1} {2}', inputs.mode, inputs.sha, inputs.argsHash) || format('broker pr #{0} {1}', github.event.pull_request.number, github.event.pull_request.head.sha) }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full commit sha to test (must be pushed)
+        required: true
+      mode:
+        description: Profile mode (test-all, all, e2e, e2e-full, int, cmd, …)
+        default: all
+      args:
+        description: JSON array of extra args for the mode (a run with args posts no commit status)
+        default: '[]'
+      argsHash:
+        description: sha256 of the compact JSON args (ci-broker dispatch fills it; - for none). The daemon checks it.
+        default: '-'
+  pull_request:
+    types: [labeled, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  broker:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (contains(github.event.pull_request.labels.*.name, 'ci-broker-test') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'ci-broker-test'))
+    runs-on: [self-hosted, ci-broker]
+    # On the JOB, not the workflow: workflow-level concurrency applies before `if:`, so any other label added to the PR
+    # would cancel a running ci-broker-test run and then skip itself.
+    concurrency:
+      group: ${{ github.event_name == 'pull_request' && format('broker-pr-{0}', github.event.pull_request.number) || format('broker-run-{0}', github.run_id) }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    # longer than the daemon's queueTimeoutSec (1 h) plus a typical run
+    timeout-minutes: 240
+    steps:
+      - name: ci-broker submit
+        env:
+          REPO: ${{ github.repository }}
+          # the PR head, not the merge sha: the same commit a local sign-off marks
+          SHA: ${{ inputs.sha || github.event.pull_request.head.sha }}
+          MODE: ${{ inputs.mode || 'all' }}
+          ARGS: ${{ inputs.args || '[]' }}
+        # exec: GitHub's cancel signal must reach ci-broker (it withdraws its interest and the job is cancelled)
+        run: |
+          mapfile -d '' args < <(jq -j '.[] | tostring + "\u0000"' <<<"$ARGS")
+          exec ci-broker submit --github --repo "$REPO" --sha "$SHA" --mode "$MODE" -- "${args[@]}"
+      - name: upload artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-broker-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-broker-artifacts/
+          if-no-files-found: ignore

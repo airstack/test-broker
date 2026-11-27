@@ -1,0 +1,13 @@
+# written by scripts/install.sh; do not edit (re-run install)
+[Unit]
+Description=ci-broker public-lane network firewall rules
+After=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/ci-broker/pub-net-rules
+
+[Install]
+WantedBy=docker.service

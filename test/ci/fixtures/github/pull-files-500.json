@@ -1,0 +1,6 @@
+{
+  "recordedAt": "2026-11-11T04:58:36.894Z",
+  "request": "GET /repos/octo-other/ci-broker-spike/pulls/1/files?per_page=100",
+  "ghExit": 1,
+  "ghApiI": "HTTP/2.0 500 Internal Server Error\nDate: Wed, 11 Nov 2026 04:58:36 GMT\r\nServer: github.com\r\nVary: Accept-Encoding, Accept, X-Requested-With\r\nX-Github-Edge-Region: iad\r\nX-Github-Request-Id: D450:2B7C90:29628B:827229:6AF3F5F8\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 4628\r\nX-Ratelimit-Reset: 1794373117\r\nX-Ratelimit-Resource: core\r\nX-Ratelimit-Used: 372\r\n\r\n"
+}

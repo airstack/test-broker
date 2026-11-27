@@ -1,0 +1,4 @@
+#!/bin/sh
+# test-broker, the client (installed as ~/.local/bin/test-broker; symlinks are resolved).
+D=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd -P)
+exec node --no-warnings=ExperimentalWarning "$D/src/tb/cli.ts" "$@"

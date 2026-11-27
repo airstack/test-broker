@@ -1,0 +1,30 @@
+{
+  "advice": "Run the unit suite while you work. Run e2e once before you push, not after every change.",
+  "boat": {
+    "remoteScript": ".test-broker/remote.sh",
+    "infraExitCodes": [89, 90, 91, 92, 96],
+    "artifacts": ["test-results"]
+  },
+  "suites": {
+    "unit": {
+      "local": { "cpus": 4, "minCpus": 2, "memGb": 4 },
+      "boat": {
+        "shards": [{ "name": "unit", "units": 2, "args": ["unit"], "passArgs": true }],
+        "maxSec": 900
+      }
+    },
+    "e2e": {
+      "local": { "cpus": 8, "minCpus": 4, "memGb": 8, "locks": ["port:3000"] },
+      "boat": {
+        "shards": [
+          { "name": "e2e-1", "size": "large", "args": ["e2e", "--shard=1/2"] },
+          { "name": "e2e-2", "size": "large", "args": ["e2e", "--shard=2/2"] }
+        ],
+        "maxSec": 1800
+      }
+    },
+    "lint": {
+      "local": { "cpus": 2, "minCpus": 1 }
+    }
+  }
+}

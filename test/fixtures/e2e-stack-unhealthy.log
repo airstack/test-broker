@@ -1,0 +1,21 @@
+ci-broker: e2e-1 attempt 1 on boat:cib-devbox-acme-large-ujc10v (resumed)
+
+=== [0s] checkout d6a6ff0f74e4804d610fce50c2114430caec63fc
+HEAD: d6a6ff0f7 settings: review fixes
+
+=== [64s] npm ci
+added 812 packages in 19s
+
+=== [85s] migrate the local database
+✅ No migrations to apply!
+
+=== [120s] playwright browser
+chromium 131.0.6778.33 (playwright build v1148) is already installed
+
+=== [124s] npm run test:e2e -- --shard=1/3
+[test-e2e] starting the dev stack → http://localhost:8700 (log: .dev/test-e2e-dev.log)
+[test-e2e] the stack did not become healthy at http://localhost:8700 — see .dev/test-e2e-dev.log
+[test-e2e] stopping the stack this run started…
+npm error code 1
+
+=== [794s] done: mode=e2e sha=d6a6ff0f74e4804d610fce50c2114430caec63fc slot=0 rc=1 elapsed=794s

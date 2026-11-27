@@ -1,0 +1,24 @@
+=== [0s] bootstrap: node
+
+=== [2s] checkout 105635ecdbdbed5879ef8f5df8b3629c88d09a27
+HEAD: 105635ec api: page the project list
+
+=== [6s] npm ci
+added 640 packages in 14s
+
+=== [21s] test:int packages/api --shard=1/3
+
+ RUN  v4.1.12 /home/user/cib/0/example-org__app/packages/api
+
+ ✓ |api| src/projects/list.int.test.ts (212 tests) 1204ms
+ ✓ |api| src/projects/rename.int.test.ts (88 tests) 410ms
+ ✓ |api| src/tokens/revoke.int.test.ts (301 tests) 2310ms
+ ✓ |api| src/search/index.int.test.ts (796 tests) 6020ms
+
+ Test Files  72 passed (72)
+      Tests  1397 passed (1397)
+   Start at  19:49:08
+   Duration  18.23s (transform 7.24s, setup 16.11s, import 3.27s, tests 30.82s, environment 0ms)
+
+
+=== [44s] done: mode=int-shard ref=105635ecdbdbed5879ef8f5df8b3629c88d09a27 rc=0 elapsed=44s

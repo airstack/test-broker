@@ -1,0 +1,3 @@
+# ci-broker: the one-daemon lock (the daemon flocks it, read-only; 0640 so no other user can hold it)
+# written by scripts/install.sh from install.conf
+f /run/lock/ci-brokerd.lock 0640 root @DAEMON_USER@ -

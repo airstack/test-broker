@@ -1,0 +1,29 @@
+{
+  "name": "test-broker",
+  "version": "0.1.0-beta.1",
+  "private": true,
+  "type": "module",
+  "description": "Fast admission for local test runs: run here with N CPUs, offload to Boat sandboxes, or say busy. Includes the opt-in ci-broker (GitHub runner broker, experimental).",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/airstack/test-broker.git"
+  },
+  "packageManager": "pnpm@12.23.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "ci-broker": "bin/ci-broker",
+    "test-broker": "bin/test-broker"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=4 'test/**/*.test.ts'",
+    "typecheck": "tsc --noEmit",
+    "test:root": "node --test test/ci/docker-root/root-tests.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "^5.9.3"
+  }
+}

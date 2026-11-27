@@ -1,0 +1,9 @@
+#!/bin/bash
+# fake boat (the root tests' pinned "download")
+case ${1:-} in
+  --version) echo "boat 1.0.97 (fake)" ;;
+  status) echo "logged in (fake)" ;;
+  list) echo '[]' ;;
+  login) echo "fake device code: ABCD-EFGH" ;;
+  *) exit 0 ;;
+esac

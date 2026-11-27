@@ -1,0 +1,132 @@
+=== [0s] bootstrap: node
+
+=== [4s] checkout feat/signup-flow
+HEAD: 3f2a91c0 signup: confirm the email before the dashboard
+
+=== [9s] npm ci
+added 812 packages in 21s
+
+=== [31s] playwright install chromium
+chromium 131.0.6778.33 (playwright build v1148) downloaded
+
+=== [52s] e2e: npx playwright test --reporter=list
+
+Running 36 tests using 4 workers
+
+  ✓   1 [chromium] › tests/api/health.spec.ts:9:3 › @smoke api › health answers 200 with the build id (1.1s)
+  ✓   2 [chromium] › tests/api/projects.spec.ts:21:3 › @core projects api › create, rename and delete a project (2.7s)
+  ✓   3 [chromium] › tests/api/projects.spec.ts:58:3 › @core projects api › a member cannot delete another member's project (1.9s)
+  ✓   4 [chromium] › tests/api/tokens.spec.ts:30:3 › @core tokens › a revoked token is refused at once (2.2s)
+  ✓   5 [chromium] › tests/browser/settings.spec.ts:12:3 › @core browser — settings › change the display name and see it in the header (6.4s)
+  ✘   6 [chromium] › tests/browser/signup.spec.ts:35:3 › @core browser — sign up and sign in › sign up → confirm email → dashboard; sign in again (18.8s)
+  ✘   7 [chromium] › tests/browser/editor.spec.ts:90:3 › @ui editor › one manifest fetch serves both panes; New file in the sidebar selects it (12.0s)
+  ✘   8 [chromium] › tests/browser/dashboard-smoke.spec.ts:14:3 › @core dashboard › dashboard mounts with its sidebar and no hook errors (14.4s)
+  ✘   9 [chromium] › tests/browser/signup.spec.ts:35:3 › @core browser — sign up and sign in › sign up → confirm email → dashboard; sign in again (retry #1) (17.9s)
+  ✘  10 [chromium] › tests/browser/dashboard-smoke.spec.ts:14:3 › @core dashboard › dashboard mounts with its sidebar and no hook errors (retry #1) (621ms)
+  ✘  11 [chromium] › tests/browser/editor.spec.ts:90:3 › @ui editor › one manifest fetch serves both panes; New file in the sidebar selects it (retry #1) (4.4s)
+  ✘  12 [chromium] › tests/browser/editor.spec.ts:190:3 › @ui editor › the client and the server agree on the sync handshake (12.4s)
+  ✘  13 [chromium] › tests/browser/editor.spec.ts:151:3 › @ui editor › a deep link to a file opens it on a fresh load (13.1s)
+  ✘  14 [chromium] › tests/browser/editor.spec.ts:114:3 › @ui editor › New file clicked before the editor mounts: the editor opens it once it mounts (12.3s)
+  ✓  15 [chromium] › tests/browser/editor.spec.ts:151:3 › @ui editor › a deep link to a file opens it on a fresh load (retry #1) (4.7s)
+  ✓  16 [chromium] › tests/browser/editor.spec.ts:190:3 › @ui editor › the client and the server agree on the sync handshake (retry #1) (5.0s)
+  ✓  17 [chromium] › tests/browser/editor.spec.ts:114:3 › @ui editor › New file clicked before the editor mounts: the editor opens it once it mounts (retry #1) (5.3s)
+  ✓  18 [chromium] › tests/browser/editor.spec.ts:228:3 › @ui editor › the language picker reads /api/languages (3.1s)
+  ✓  19 [chromium] › tests/browser/editor.spec.ts:244:3 › @ui editor › the editor mounts no portal root content (2.9s)
+  ✓  20 [chromium] › tests/browser/search.spec.ts:11:3 › @core search › search finds a file by name (2.4s)
+  ✓  21 [chromium] › tests/browser/search.spec.ts:40:3 › @core search › an empty search shows the recent files (2.3s)
+
+
+  1) [chromium] › tests/browser/signup.spec.ts:35:3 › @core browser — sign up and sign in › sign up → confirm email → dashboard; sign in again
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByText('Welcome to your dashboard')
+    Expected: visible
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" getByText('Welcome to your dashboard') with timeout 5000ms
+      - waiting for getByText('Welcome to your dashboard')
+
+
+      83 |     await page.getByLabel('Confirmation code').fill(code)
+      84 |     await page.getByRole('button', { name: 'Confirm' }).click()
+    > 85 |     await expect(page.getByText('Welcome to your dashboard')).toBeVisible()
+         |                                                               ^
+      86 |     await expect(page).not.toHaveURL(/\/(login|signup)/)
+      87 |
+        at /home/user/app/e2e/tests/browser/signup.spec.ts:85:62
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/browser-signup--core-d0e76-board-sign-in-again-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: expect(page).toHaveURL(expected) failed
+
+    Expected pattern: /\/dashboard/
+    Received string:  "http://localhost:8700/signup"
+    Timeout: 5000ms
+
+      78 |     await page.getByLabel('Password').fill(password)
+      79 |     await page.getByRole('button', { name: 'Sign up' }).click()
+    > 80 |     await expect(page).toHaveURL(/\/dashboard/)
+         |                        ^
+        at /home/user/app/e2e/tests/browser/signup.spec.ts:80:24
+
+  2) [chromium] › tests/browser/dashboard-smoke.spec.ts:14:3 › @core dashboard › dashboard mounts with its sidebar and no hook errors
+
+    Error: account setup failed 500: Error: database not migrated
+
+       at ../lib/accounts.ts:41
+
+      39 |   const res = await fetch(`${base}/api/accounts`, { method: 'POST', body })
+      40 |   if (!res.ok) {
+    > 41 |     throw new Error(`account setup failed ${res.status}: ${await res.text()}`)
+         |           ^
+      42 |   }
+
+        at createAccount (/home/user/app/e2e/lib/accounts.ts:41:11)
+        at /home/user/app/e2e/tests/browser/dashboard-smoke.spec.ts:15:15
+
+  3) [chromium] › tests/browser/editor.spec.ts:90:3 › @ui editor › one manifest fetch serves both panes; New file in the sidebar selects it
+
+    Error: account setup failed 500: Error: database not migrated
+
+       at ../lib/accounts.ts:41
+
+        at createAccount (/home/user/app/e2e/lib/accounts.ts:41:11)
+        at /home/user/app/e2e/tests/browser/editor.spec.ts:52:14
+
+  4) [chromium] › tests/browser/editor.spec.ts:114:3 › @ui editor › New file clicked before the editor mounts: the editor opens it once it mounts
+
+    TypeError: fetch failed
+    [cause]: SocketError: other side closed
+
+  5) [chromium] › tests/browser/editor.spec.ts:151:3 › @ui editor › a deep link to a file opens it on a fresh load
+
+    TypeError: fetch failed
+    [cause]: SocketError: other side closed
+
+  6) [chromium] › tests/browser/editor.spec.ts:190:3 › @ui editor › the client and the server agree on the sync handshake
+
+    TypeError: fetch failed
+    [cause]: SocketError: other side closed
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/browser-editor--ui-ebca4-ree-on-the-sync-handshake-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3 failed
+    [chromium] › tests/browser/signup.spec.ts:35:3 › @core browser — sign up and sign in › sign up → confirm email → dashboard; sign in again
+    [chromium] › tests/browser/dashboard-smoke.spec.ts:14:3 › @core dashboard › dashboard mounts with its sidebar and no hook errors
+    [chromium] › tests/browser/editor.spec.ts:90:3 › @ui editor › one manifest fetch serves both panes; New file in the sidebar selects it
+  3 flaky
+    [chromium] › tests/browser/editor.spec.ts:114:3 › @ui editor › New file clicked before the editor mounts: the editor opens it once it mounts
+    [chromium] › tests/browser/editor.spec.ts:151:3 › @ui editor › a deep link to a file opens it on a fresh load
+    [chromium] › tests/browser/editor.spec.ts:190:3 › @ui editor › the client and the server agree on the sync handshake
+  30 passed (1.3m)
+
+=== [235s] done: mode=e2e ref=feat/signup-flow rc=1 elapsed=235s

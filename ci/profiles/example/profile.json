@@ -1,0 +1,33 @@
+{
+  "name": "example",
+  "repo": "example-org/app",
+  "boatEnvironment": "example",
+  "remoteScript": "remote-run.sh",
+  "artifacts": ["test-results", "coverage", "ci-broker-logs"],
+  "infraExitCodes": [89, 90, 91, 92, 93, 96],
+  "check": ["cmd", "node --version && npm --version"],
+  "github": { "prMode": "test" },
+  "local": {
+    "where": "container",
+    "image": "ci-broker-example:latest",
+    "setup": "npm ci",
+    "env": {},
+    "commands": {
+      "test": "npm test",
+      "int": "npm run test:int -- {args}",
+      "e2e": "npm run test:e2e -- {args}",
+      "cmd": "{cmd}"
+    }
+  },
+  "modes": {
+    "test": [
+      { "name": "unit", "size": "default", "args": ["unit"] },
+      { "name": "int-1", "size": "default", "args": ["int-shard", "1/2"] },
+      { "name": "int-2", "size": "default", "args": ["int-shard", "2/2"] }
+    ],
+    "e2e": [{ "name": "e2e", "size": "large", "args": ["e2e"], "passArgs": true }],
+    "all": "test + e2e",
+    "int": [{ "name": "int", "size": "default", "args": ["int"], "passArgs": true, "requireArgs": "ci-broker submit --mode int -- <test file…> (e.g. test/int/api.test.ts)" }],
+    "cmd": [{ "name": "cmd", "size": "default", "args": ["cmd"], "passArgs": true, "requireArgs": "ci-broker submit --mode cmd -- '<shell command>'" }]
+  }
+}

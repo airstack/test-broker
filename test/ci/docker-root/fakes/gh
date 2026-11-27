@@ -1,0 +1,18 @@
+#!/bin/bash
+# fake gh (inside the test gh tarball): users, a token, and `api -i` answers for the daemon's trust checks
+case "${1:-} ${2:-}" in
+  "--version "*) echo "gh version 2.103.3 (fake)" ;;
+  "auth token") [[ -e /tmp/gh-fail ]] && exit 1; echo "ghp_ROOTTESTTOKENROOTTESTTOKEN1234567" ;;
+  "api users/"*) echo '{"login":"x","id":1,"type":"User"}' ;; # never used by install: --approve asks GitHub unauthenticated
+  "api -i")
+    p=${3:-}
+    if [[ $p =~ ^repos/[^/]+/[^/]+$ ]]; then
+      r=${p#repos/}
+      printf 'HTTP/2.0 200 OK\r\nContent-Type: application/json\r\nX-Github-Request-Id: x\r\n\r\n{"full_name":"%s","private":true,"permissions":{"push":true},"default_branch":"main"}' "$r"
+    elif [[ $p == user ]]; then
+      printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: repo, workflow\r\n\r\n{"login":"daemonbot"}'
+    else printf 'HTTP/2.0 404 Not Found\r\n\r\n{"message":"Not Found"}'; exit 1; fi
+    ;;
+  "api "*) echo '{}' ;;
+  *) exit 0 ;;
+esac

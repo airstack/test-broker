@@ -1,0 +1,6 @@
+#!/bin/sh
+# ci-broker, the client. In a release (/opt/ci-broker/releases/<…>/bin) it runs the release's pinned node; in a
+# checkout (single) the node on PATH. Symlinks are resolved (installed as ~/.local/bin/ci-broker in single).
+D=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd -P)
+if [ -x "$D/node/bin/node" ]; then N=$D/node/bin/node; else N=node; fi
+exec "$N" --no-warnings=ExperimentalWarning "$D/src/ci/cli.ts" "$@"

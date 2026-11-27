@@ -1,0 +1,13 @@
+# written by scripts/install.sh; do not edit (re-run the install)
+[Unit]
+Description=test-brokerd (fast admission for local test runs)
+
+[Service]
+Environment=PATH=@PATH@
+ExecStart=@BIN@
+Restart=always
+RestartSec=2
+UMask=0077
+
+[Install]
+WantedBy=default.target

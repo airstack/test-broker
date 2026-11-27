@@ -1,0 +1,6 @@
+#!/bin/sh
+# ci-brokerd, the daemon (split: the system unit runs a release's bin/ci-brokerd; single: the user service). The
+# release's pinned node when there is one, else the node on PATH.
+D=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd -P)
+if [ -x "$D/node/bin/node" ]; then N=$D/node/bin/node; else N=node; fi
+exec "$N" --no-warnings=ExperimentalWarning "$D/src/ci/daemon/main.ts" "$@"

@@ -1,0 +1,24 @@
+#!/bin/bash
+# fake docker (root tests): networks are logged; `run` runs the command in its -w dir as the caller (no isolation)
+echo "docker $*" >>/var/log/fake/docker 2>/dev/null || true
+case $1 in
+  network) [[ $2 == inspect ]] && { [[ -f /var/log/fake/net ]] && echo cib-pub0 && exit 0; exit 1; }; [[ $2 == create ]] && touch /var/log/fake/net; exit 0 ;;
+  info) echo iptables ;;
+  run)
+    w='' envs=()
+    shift
+    while (($#)); do
+      case $1 in
+        -w) w=$2; shift 2 ;;
+        -e) [[ $2 == *=* ]] && envs+=("$2"); shift 2 ;;
+        --rm | --init) shift ;;
+        -*) shift 2 ;;
+        *) break ;;
+      esac
+    done
+    shift # the image
+    cd "$w" && exec env "${envs[@]}" "$@"
+    ;;
+  ps | volume) exit 0 ;;
+  *) exit 0 ;;
+esac

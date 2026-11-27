@@ -1,0 +1,46 @@
+ RUN  v4.1.12 /home/user/runs/vtfx
+
+ ❯ |unit| src/math.unit.test.ts (3 tests | 2 failed) 26ms
+     × subtracts 14ms
+       × divides, by zero: "x" 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| src/math.unit.test.ts > math > subtracts
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ src/math.unit.test.ts:5:19
+      3|   it('adds', () => { expect(1 + 1).toBe(2) })
+      4|   it('subtracts', () => {
+      5|     expect(3 - 2).toBe(2)
+       |                   ^
+      6|   })
+      7|   describe('nested', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |unit| src/math.unit.test.ts > math > nested > divides, by zero: "x"
+Error: boom: bad
+second line
+ ❯ src/math.unit.test.ts:8:47
+      6|   })
+      7|   describe('nested', () => {
+      8|     it('divides, by zero: "x"', () => { throw new Error('boom: bad\nse…
+       |                                               ^
+      9|   })
+     10| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  2 failed | 2 passed (4)
+   Start at  08:02:05
+   Duration  471ms (transform 104ms, setup 0ms, import 165ms, tests 32ms, environment 0ms)
+

@@ -1,0 +1,19 @@
+#!/bin/bash
+# fake curl (root tests): serves the local tool and runner tarballs by URL
+out='' url=''
+while (($#)); do case $1 in -o) out=$2; shift 2 ;; -*) shift ;; *) url=$1; shift ;; esac; done
+echo "curl $url" >>/var/log/fake/curl
+case $url in
+  *nodejs.org*) src=/fx/node.tar.xz ;;
+  *cli/cli*) src=/fx/gh.tar.gz ;;
+  *boat.dev*) src=/fx/boat ;;
+  *actions/runner/releases/download/v2.338.2/*) src=/fx/runner.tgz ;;
+  *actions/runner/releases/download/v9.9.9/*) src=/fx/boat ;; # a tarball whose hash is not the allowlisted one
+  https://api.github.com/users/*)
+    l=${url##*/}
+    if [[ $l == bot ]]; then echo '{"login":"bot","id":7,"type":"Bot"}' >"$out"; else echo "{\"login\":\"$l\",\"id\":$((${#l} * 1000 + 1)),\"type\":\"User\"}" >"$out"; fi
+    exit 0
+    ;;
+  *) echo "curl: (22) 404 $url" >&2; exit 22 ;;
+esac
+cp "$src" "$out"
