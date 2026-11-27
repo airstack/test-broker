@@ -84,6 +84,8 @@ export type Ctx = {
   ownRelease: string | null
   /** where the system units live (doctor reads the runner units and the host-address drop-in) */
   systemdDir: string
+  /** this machine's network addresses (doctor checks the host-address drop-in against them) */
+  hostAddrs: () => string[]
   /** the daemon's own log file (GET /daemon-log); null = not teed */
   logFile: string | null
 }

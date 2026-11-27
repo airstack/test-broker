@@ -497,14 +497,14 @@ test('correctness #11: doctor warns on a release that is not current, runner uni
   writeFileSync(runners, JSON.stringify([{ id: 'me__app-1', repo: 'me/app', name: 'r1' }]))
   const rel = join(tmp(), 'RELEASE')
   writeFileSync(rel, `${'b'.repeat(40)}\nprotocol 2\n`)
-  const h = harness({ cfg: { layout: 'split', operatorUid: process.getuid!(), runnersJson: runners, releaseFile: rel }, deps: { ownRelease: 'a'.repeat(40), systemdDir: sys } })
+  const h = harness({ cfg: { layout: 'split', operatorUid: process.getuid!(), runnersJson: runners, releaseFile: rel }, deps: { ownRelease: 'a'.repeat(40), systemdDir: sys, hostAddrs: () => ['198.51.100.9', '10.0.0.5'] } })
   const { doctor } = await import('../../src/ci/daemon/local-door.ts')
   const r = await doctor(h.d, null)
   const text = r.lines.map((l) => l.text).join('\n')
   assert.match(text, /current release b{12} is not what this daemon runs \(a{12}\): restart/)
   assert.match(text, /runner unit ci-broker-runner@me__app-9 is not in runners\.json/)
   assert.ok(!/me__app-1 is not in/.test(text))
-  assert.match(text, /10-host-addrs\.conf is out of date.*runnerctl install-unit/)
+  assert.match(text, /10-host-addrs\.conf is out of date \(198\.51\.100\.9 not denied.*runnerctl install-unit/)
 })
 
 test('correctness #13: a switch drain can be cancelled (POST /drain {cancel}); submits go through again', async () => {

@@ -1,13 +1,25 @@
 // In-memory Boat for tests. Each box gets its own temp HOME; `exec` runs the command with real bash there (so the
 // wrapper and its process-group kill are tested for real), unless `onCommand` takes it. Starts are counted against a
 // budget like the real account. `gate` holds create/resume/stop until the test resolves it (transitional states).
-import { spawn } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { Boat, Box, EnvInfo, ExecOpts, Starts } from '../src/core/boat.ts'
 
 type FakeBox = Box & { home: string }
+
+// A fake box shares the host's CPUs. A packed large box pins slots to CPUs 4-7, which a smaller host (a 4-CPU CI
+// runner) does not have: there the shim runs the command unpinned. Pinning itself is tested in test/ci/wrap.test.ts.
+const SHIM_PATH = ((): string | null => {
+  const real = spawnSync('bash', ['-c', 'command -v taskset'], { encoding: 'utf8' }).stdout.trim()
+  if (!real) return null
+  const dir = mkdtempSync(join(tmpdir(), 'fake-boat-bin-'))
+  const f = join(dir, 'taskset')
+  writeFileSync(f, `#!/bin/bash\nif [ "$1" = -c ] && ! ${real} -c "$2" true 2>/dev/null; then shift 2; exec "$@"; fi\nexec ${real} "$@"\n`)
+  chmodSync(f, 0o755)
+  return dir
+})()
 type Op = 'create' | 'resume' | 'stop' | 'delete' | 'list'
 
 export class FakeBoat implements Boat {
@@ -172,7 +184,7 @@ export class FakeBoat implements Boat {
       if (code !== undefined) return { code, out: '' }
     }
     return new Promise<{ code: number; out: string }>((resolve) => {
-      const p = spawn('bash', ['-c', cmd], { env: { ...process.env, HOME: b.home }, cwd: b.home })
+      const p = spawn('bash', ['-c', cmd], { env: { ...process.env, HOME: b.home, ...(SHIM_PATH ? { PATH: `${SHIM_PATH}:${process.env.PATH}` } : {}) }, cwd: b.home })
       let out = ''
       const on = (d: Buffer) => {
         out += d.toString()

@@ -1,7 +1,6 @@
 // The local door's routes beyond the job API: admission for submits and checks, /hello, /trust*, /doctor,
 // /daemon-log, /admin/seed, and the status banner. The caller is the operator (trusted); the trust checks still run.
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from 'node:fs'
-import { networkInterfaces } from 'node:os'
 import { join } from 'node:path'
 import type { ServerResponse } from 'node:http'
 import { PROTOCOL } from '../client/http.ts'
@@ -224,7 +223,7 @@ export async function doctor(d: Daemon, operatorTokenSha: string | null) {
     const drop = join(c.systemdDir, 'ci-broker-runner@.service.d', '10-host-addrs.conf')
     if (existsSync(drop)) {
       const listed = new Set((/^IPAddressDeny=(.*)$/m.exec(readFileSync(drop, 'utf8'))?.[1] ?? '').split(/\s+/).filter(Boolean).map((a) => a.replace(/\/\d+$/, '')))
-      const now = Object.values(networkInterfaces()).flat().filter((a) => a && !a.internal && !/^(fe80:|169\.254\.)/i.test(a.address)).map((a) => a!.address)
+      const now = c.hostAddrs()
       // the unit already denies the private, CGNAT, ULA and link-local ranges; only the other addresses need listing
       const ranged = (a: string) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|127\.|f[cd][0-9a-f]{2}:)/i.test(a)
       const missing = now.filter((a) => !listed.has(a) && !ranged(a))
