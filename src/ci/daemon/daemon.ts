@@ -1,7 +1,7 @@
 // ci-brokerd's parts wired together. Everything time- or process-dependent comes in through DaemonDeps.
 import { execFile } from 'node:child_process'
 import { appendFileSync, existsSync, readdirSync, readFileSync, renameSync, statSync } from 'node:fs'
-import { cpus, loadavg } from 'node:os'
+import { cpus, loadavg, networkInterfaces } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Boat } from '../../core/boat.ts'
@@ -30,6 +30,10 @@ import { JobStreams } from './stream.ts'
 import { Timers } from './timers.ts'
 import { Watchdog } from './watchdog.ts'
 import { scrubText } from './scrub.ts'
+
+/** This machine's addresses: not loopback, not link-local. */
+const hostAddrs = (): string[] =>
+  Object.values(networkInterfaces()).flat().filter((a) => a && !a.internal && !/^(fe80:|169\.254\.)/i.test(a.address)).map((a) => a!.address)
 
 export const WRAP_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'core', 'wrap', 'cib-wrap.sh')
 
@@ -62,6 +66,8 @@ export type DaemonDeps = {
   ownRelease?: string | null
   /** default /etc/systemd/system */
   systemdDir?: string
+  /** default: the addresses of this machine's interfaces (not loopback, not link-local) */
+  hostAddrs?: () => string[]
   /** split: the owner checks of root's and the operator's files (tests: their own uid) */
   splitDeps?: import('../config.ts').SplitDeps
 }
@@ -166,7 +172,7 @@ export class Daemon {
       draining: false,
       onDrained: d.onDrained ?? (() => {}),
       jobName: (id: number) => `${cfg.daemonId}-${id}`,
-      creds, logFile, netCheck: null, systemdDir: d.systemdDir ?? '/etc/systemd/system',
+      creds, logFile, netCheck: null, systemdDir: d.systemdDir ?? '/etc/systemd/system', hostAddrs: d.hostAddrs ?? hostAddrs,
       ownRelease: d.ownRelease !== undefined ? d.ownRelease : ownReleaseOf(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'RELEASE')), switchDrain: false, awaitSeed: existsSync(join(cfg.stateDir, 'await-seed')),
       githubDoor: cfg.layout === 'split' ? 'closed: not opened yet' : 'none (single)',
       localDoor: 'open',
